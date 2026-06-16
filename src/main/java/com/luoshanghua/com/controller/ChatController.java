@@ -49,10 +49,10 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
+@Slf4j
 @RestController
 @RequestMapping("/ai/chat")
 @CrossOrigin
-@Slf4j
 public class ChatController {
 
     @Autowired
@@ -106,8 +106,8 @@ public class ChatController {
         return emitter;
     }
 
-    @RequestMapping(value = "/{msg}",produces = "text/event-stream;charset=UTF-8")
-    public SseEmitter serviceChat(@PathVariable("msg") String msg, @RequestHeader("chatId") String chatId){
+    @PostMapping(produces = "text/event-stream;charset=UTF-8")
+    public SseEmitter serviceChat(@RequestBody String msg, @RequestHeader("chatId") String chatId){
         //获取当前主线程的上下文
         RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
         // 1. 创建SSE发射器，设置10分钟超时（根据任务复杂度调整）
@@ -153,7 +153,10 @@ public class ChatController {
                     System.out.println("异常");
                 }
                 //本次会话执行完成后，将用户提问和ai回复存入对话记忆
-                fileBasedChatMemory.add(chatId,List.of(new UserMessage(msg),new AssistantMessage(aiResult)));
+                //todo 此处可以将会话存储变触发点变更为子线程所有任务完成后存储，非主线程存储，需要阻塞主线程等待子线程运行完成
+                if (aiResult != null) {
+                    fileBasedChatMemory.add(chatId,List.of(new UserMessage(msg),new AssistantMessage(aiResult)));
+                }
                 //刷新或建立该会话记忆的寿命
                 String chatMemoryCache = "chatMemory:"+BaseContent.getUser().getUserName()+":"+chatId;
                 stringRedisTemplate.opsForValue().set(chatMemoryCache,JSONUtil.toJsonStr(LocalDateTime.now().plusHours(24)));

@@ -2,7 +2,7 @@ package com.luoshanghua.com.agent.plan;
 
 
 import com.luoshanghua.com.advisor.MyLoggerAdvisor;
-import com.luoshanghua.com.agent.Kanodays88Manus;
+import com.luoshanghua.com.agent.EvelynManus;
 import com.luoshanghua.com.agent.sse.SSESend;
 import com.luoshanghua.com.common.ChatSystem;
 import com.luoshanghua.com.content.BaseContent;
@@ -125,18 +125,18 @@ public class PlanExecute {
                         log.info("[Phase] Starting subtask {}: {}", task.taskId(), task.taskName());
                         try {
                             ToolCallback[] tools = getTools(task.toolNames());
-                            Kanodays88Manus kanodays88Manus = new Kanodays88Manus(tools, openAiChatModel);
+                            EvelynManus evelynManus = new EvelynManus(tools, openAiChatModel);
 //                            safeSendEventThink(emitter, "开始执行任务【" + task.taskName() + "】\n");
                             SSESend.sendEventThink(emitter,"开始执行任务【" + task.taskName() + "】\n");
                             //获取该任务对应所需的上游任务的结果
                             String upStreamTaskResult = checkAndFillUpstreamContext(task, resultMap);
                             //将上游的结果作为记忆输入给智能体
-                            kanodays88Manus.setMessageList(Stream.of(upStreamTaskResult)
+                            evelynManus.setMessageList(Stream.of(upStreamTaskResult)
                                     .map(SystemMessage::new).collect(Collectors.toList()));
 
                             //执行任务，得到本次任务的原始结果
                             long tRun = System.currentTimeMillis();
-                            List<String> childResult = kanodays88Manus.run(task.taskContent(), task.taskName(), emitter);
+                            List<String> childResult = evelynManus.run(task.taskContent(), task.taskName(), emitter);
                             log.info("[Phase] Subtask {} run() took {} ms", task.taskId(), System.currentTimeMillis() - tRun);
                             //原始结果拼接
                             String result = String.join("/n---/n", childResult);
@@ -164,6 +164,7 @@ public class PlanExecute {
                 }
                 //开启一个新异步任务ComletableFutrue,将之前的任务集合futrues传进来，在任务集合中的所有异步任务完成时，该任务才算完成，未完成时程序处于阻塞状态
                 //在这里的作用是阻塞等待全部异步任务完成
+                //todo 此处可以变更为倒计时锁后自动触发后续意图
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             } finally {
                 //关闭线程池
@@ -187,8 +188,7 @@ public class PlanExecute {
 
     //从所需工具名称集合中获取到具体工具集合
     public ToolCallback[] getTools(Set<String> toolNames){
-        ToolCallback[] toolCallbacks = Arrays.stream(allTools).filter(t -> (toolNames.contains(t.getToolDefinition().name())||t.getToolDefinition().name().equals("assignmentFinish"))).toArray(ToolCallback[]::new);
-        return toolCallbacks;
+        return Arrays.stream(allTools).filter(t -> (toolNames.contains(t.getToolDefinition().name())||t.getToolDefinition().name().equals("assignmentFinish"))).toArray(ToolCallback[]::new);
     }
     //任务分解
     public DecomposedTasks decomposeTaskWithContract(String task) {
