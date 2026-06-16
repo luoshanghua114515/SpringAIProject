@@ -46,6 +46,12 @@ public class RouterAgent {
     }
 
 
+    /**
+     * 匹配用户输入的意图
+     * @param userPrompt 用户输入
+     * @param conversationId 会话ID
+     * @return RouteDecision 意图分解及与其关联的skill
+     */
     public RouteDecisionTotal route(String userPrompt, String conversationId) {
         SSESend.sendEventThink(sseEmitter,"正在进行意图分析...\n");
         //用LLM匹配这次用户提问所使用的skill
@@ -186,8 +192,8 @@ public class RouterAgent {
 
     /**
      * 通过skillName加载详细的skill
-     * @param skillNames
-     * @return
+     * @param skillNames 需要加载的skill
+     * @return 技能列表
      */
     private List<Skill> buildSelectedSkillsContext(List<String> skillNames) {
         if (skillNames == null || skillNames.isEmpty()) return null;

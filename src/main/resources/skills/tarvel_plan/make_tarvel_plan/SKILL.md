@@ -17,4 +17,3 @@ metadata: {author: dev-team, version: 1.0}
 - 上海3天旅游
 - 北京出差2天
 - 杭州周末游
-  }

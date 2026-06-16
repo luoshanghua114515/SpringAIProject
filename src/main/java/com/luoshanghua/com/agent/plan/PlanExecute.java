@@ -27,7 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
+import java.util.stream.Stream;
 
 
 /**
@@ -60,7 +60,6 @@ record DistilledResult(
 public class PlanExecute {
 
     private ChatClient chatClient;
-
 
     private OpenAiChatModel openAiChatModel;
 
@@ -96,15 +95,15 @@ public class PlanExecute {
         }).collect(Collectors.joining("\n---\n"));
         if(!SSESend.sendEventThink(emitter,"任务拆分完成：\n"+taskMessage)) return null;
         //对每个子任务执行，得到结果集（并行wave执行）
-        //ConcurrentHashMap线程安全hashMap，内部使用乐观锁或悲观锁的形式实现线程安全
-        //原理简单来说就是put操作时，对对应的hash桶上锁，写入操作完成后才释放锁供其他线程操作
         ConcurrentHashMap<Integer, DistilledResult> resultMap = new ConcurrentHashMap<>();
+        //构建待执行的任务列表
         List<Set<Integer>> waves = buildExecutionWaves(subTasks);
         Map<Integer, SubTask> taskMap = subTasks.stream()
                 .collect(Collectors.toMap(SubTask::taskId, Function.identity()));
 
         for (Set<Integer> waveTaskIds : waves) {
             //创建一个线程数量为waveTaskIds.size()的线程池
+            //todo: 线程池需要复用
             ExecutorService executor = Executors.newFixedThreadPool(waveTaskIds.size());
             try {
                 //创建一个装载异步任务类CompletableFuture集合
@@ -132,15 +131,15 @@ public class PlanExecute {
                             //获取该任务对应所需的上游任务的结果
                             String upStreamTaskResult = checkAndFillUpstreamContext(task, resultMap);
                             //将上游的结果作为记忆输入给智能体
-                            kanodays88Manus.setMessageList(List.of(upStreamTaskResult).stream()
-                                    .map(s -> new SystemMessage(s)).collect(Collectors.toList()));
+                            kanodays88Manus.setMessageList(Stream.of(upStreamTaskResult)
+                                    .map(SystemMessage::new).collect(Collectors.toList()));
 
                             //执行任务，得到本次任务的原始结果
                             long tRun = System.currentTimeMillis();
                             List<String> childResult = kanodays88Manus.run(task.taskContent(), task.taskName(), emitter);
                             log.info("[Phase] Subtask {} run() took {} ms", task.taskId(), System.currentTimeMillis() - tRun);
                             //原始结果拼接
-                            String result = childResult.stream().collect(Collectors.joining("/n---/n"));
+                            String result = String.join("/n---/n", childResult);
                             //蒸馏任务结果
                             long tDistill = System.currentTimeMillis();
                             DistilledResult distilledResult;
@@ -351,7 +350,6 @@ public class PlanExecute {
      * 任务蒸馏
      * @param subTask 原任务
      * @param rawResult 原任务返回结果
-     * @param globalRequiredFields 全局任务必须要求的字段
      * @return
      */
     private DistilledResult distillSubTaskResult(SubTask subTask, String rawResult) {

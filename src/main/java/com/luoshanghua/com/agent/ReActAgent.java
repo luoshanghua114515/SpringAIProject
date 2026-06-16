@@ -4,7 +4,7 @@ import lombok.EqualsAndHashCode;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 
-@EqualsAndHashCode(callSuper = true)//自动生成equals和hashcode方法
+@EqualsAndHashCode(callSuper = true)
 public abstract class ReActAgent extends BaseAgent{
 
     //让智能体思考问题是否解决
