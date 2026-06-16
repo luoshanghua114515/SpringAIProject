@@ -1,8 +1,6 @@
 package com.luoshanghua.com.config;
 
-import com.kanodays88.skytakeoutai.tools.*;
 import com.luoshanghua.com.tools.*;
-import com.luoshanghuaAI.com.tools.*;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;

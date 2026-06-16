@@ -20,7 +20,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         OpenAiImageAutoConfiguration.class,            // 图像生成
         OpenAiModerationAutoConfiguration.class        // 内容审核
 })
-@MapperScan("com.kanodays88.skytakeoutai.mapper")
+@MapperScan("com.luoshanghua.com.mapper")
 @EnableCaching
 @EnableScheduling
 public class SkyTakeOutAiApplication {
