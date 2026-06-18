@@ -1,8 +1,9 @@
 package com.luoshanghua.com.tools;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
-import com.baomidou.mybatisplus.extension.conditions.query.QueryChainWrapper;
+import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.luoshanghua.com.entity.Category;
 import com.luoshanghua.com.entity.Dish;
 import com.luoshanghua.com.entity.querys.DishQuery;
@@ -47,27 +48,26 @@ public class DishTool {
         //生成唯一key
         String key = generateCacheKey(dishQuery);
         //查缓存
-        List<DishVO> cache = getCache(key, dishQuery);
-        return cache;
+        return getCache(key, dishQuery);
     }
 
     private @NonNull List<DishVO> getDishVOS(DishQuery dishQuery) {
-        QueryChainWrapper<Dish> query = dishServiceImpl.query();
+        LambdaQueryChainWrapper<Dish> query = dishServiceImpl.lambdaQuery();
         if(dishQuery.getDishNames() != null && !dishQuery.getDishNames().isEmpty()){
-            query.in("name", dishQuery.getDishNames());
+            query.in(Dish::getName, dishQuery.getDishNames());
         }
         if(dishQuery.getCategory()!=null && !dishQuery.getCategory().isEmpty()){
             List<Category> categories = categoryServiceImpl.query().select("id").in("name", dishQuery.getCategory()).list();
             if(categories!=null && !categories.isEmpty()){
-                List<Long> categories_id = categories.stream().map(c -> c.getId()).toList();
-                query.in("category_id",categories_id);
+                List<Long> categories_id = categories.stream().map(Category::getId).toList();
+                query.in(Dish::getCategoryId,categories_id);
             }
         }
         if(dishQuery.getMinPrice() != null){
-            query.ge("price", dishQuery.getMinPrice());
+            query.ge(Dish::getPrice, dishQuery.getMinPrice());
         }
         if(dishQuery.getMaxPrice() != null){
-            query.le("price", dishQuery.getMaxPrice());
+            query.le(Dish::getPrice, dishQuery.getMaxPrice());
         }
 
         //查询
@@ -79,7 +79,7 @@ public class DishTool {
             DishVO dishVO = new DishVO();
             BeanUtil.copyProperties(d,dishVO);
             List<Category> categories = categoryServiceImpl.query().select("name").eq("id", d.getCategoryId()).list();
-            List<String> categories_name = categories.stream().map(c -> c.getName()).toList();
+            List<String> categories_name = categories.stream().map(Category::getName).toList();
             dishVO.setCategoryName(categories_name.get(0));
             dishVOS.add(dishVO);
         }
@@ -90,14 +90,14 @@ public class DishTool {
     private List<DishVO> getCache(String key, DishQuery dishQuery){
         String json = stringRedisTemplate.opsForValue().get(key);
 
-        if(json == null){
+        if(StrUtil.isBlank(json)){
             //获取锁对象
             RLock lock = redissonClient.getLock(REDIS_DISH_QUERY);
 
             try{
                 //尝试上锁                     等待时间  锁时间    单位
                 boolean tryLock = lock.tryLock(3, 30, TimeUnit.SECONDS);
-                if(tryLock == true){
+                if(tryLock){
                     //上锁成功
                     //执行查询
                     List<DishVO> dishVOS = getDishVOS(dishQuery);
@@ -135,8 +135,7 @@ public class DishTool {
         }
 
         //将json转bean返回
-        List<DishVO> dishVOS = JSONUtil.toList(json, DishVO.class);
-        return dishVOS;
+        return JSONUtil.toList(json, DishVO.class);
     }
 
     // 2. 定义一个缓存 Key 前缀常量
