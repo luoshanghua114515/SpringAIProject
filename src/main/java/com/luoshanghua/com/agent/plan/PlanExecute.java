@@ -21,10 +21,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -62,6 +59,13 @@ public class PlanExecute {
     private ChatClient chatClient;
 
     private OpenAiChatModel openAiChatModel;
+
+    public static final  ThreadPoolExecutor threadPool = new ThreadPoolExecutor(
+            10,
+            10,
+            1L,
+            TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>());
 
     @Autowired
     private ToolCallback[] allTools;
@@ -102,74 +106,68 @@ public class PlanExecute {
                 .collect(Collectors.toMap(SubTask::taskId, Function.identity()));
 
         for (Set<Integer> waveTaskIds : waves) {
-            //创建一个线程数量为waveTaskIds.size()的线程池
-            //todo: 线程池需要复用
-            ExecutorService executor = Executors.newFixedThreadPool(waveTaskIds.size());
-            try {
-                //创建一个装载异步任务类CompletableFuture集合
-                List<CompletableFuture<Void>> futures = new ArrayList<>();
-                for (int taskId : waveTaskIds) {
-                    SubTask task = taskMap.get(taskId);
-                    //从线程池executor中创建异步任务，并加入到集合
-                    futures.add(CompletableFuture.runAsync(() -> {
-                        //将主线程上下文设置到当前线程上下文
-                        if(attributes != null){
-                            //主要用于获取主线程上下文，从而获取到Web请求线程（主线程）的HttpServletRequest的请求信息
-                            RequestContextHolder.setRequestAttributes(attributes);
-                        }
-                        //设置该线程的chatId
-                        BaseContent.setChatId(chatId);
-                        //设置当前异步线程的登录用户
-                        BaseContent.setUser(userLoginDTO);
-                        long taskStart = System.currentTimeMillis();
-                        log.info("[Phase] Starting subtask {}: {}", task.taskId(), task.taskName());
-                        try {
-                            ToolCallback[] tools = getTools(task.toolNames());
-                            EvelynManus evelynManus = new EvelynManus(tools, openAiChatModel);
+            //创建一个装载异步任务类CompletableFuture集合
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+            for (int taskId : waveTaskIds) {
+                SubTask task = taskMap.get(taskId);
+                //从线程池executor中创建异步任务，并加入到集合
+                futures.add(CompletableFuture.runAsync(() -> {
+                    //将主线程上下文设置到当前线程上下文
+                    if(attributes != null){
+                        //主要用于获取主线程上下文，从而获取到Web请求线程（主线程）的HttpServletRequest的请求信息
+                        RequestContextHolder.setRequestAttributes(attributes);
+                    }
+                    //设置该线程的chatId
+                    BaseContent.setChatId(chatId);
+                    //设置当前异步线程的登录用户
+                    BaseContent.setUser(userLoginDTO);
+                    long taskStart = System.currentTimeMillis();
+                    log.info("[Phase] Starting subtask {}: {}", task.taskId(), task.taskName());
+                    try {
+                        //todo 此处捕获异常后未通知外部阻塞线程，会导致主线程永远阻塞
+                        ToolCallback[] tools = getTools(task.toolNames());
+                        EvelynManus evelynManus = new EvelynManus(tools, openAiChatModel);
 //                            safeSendEventThink(emitter, "开始执行任务【" + task.taskName() + "】\n");
-                            SSESend.sendEventThink(emitter,"开始执行任务【" + task.taskName() + "】\n");
-                            //获取该任务对应所需的上游任务的结果
-                            String upStreamTaskResult = checkAndFillUpstreamContext(task, resultMap);
-                            //将上游的结果作为记忆输入给智能体
-                            evelynManus.setMessageList(Stream.of(upStreamTaskResult)
-                                    .map(SystemMessage::new).collect(Collectors.toList()));
+                        SSESend.sendEventThink(emitter,"开始执行任务【" + task.taskName() + "】\n");
+                        //获取该任务对应所需的上游任务的结果
+                        String upStreamTaskResult = checkAndFillUpstreamContext(task, resultMap);
+                        //将上游的结果作为记忆输入给智能体
+                        evelynManus.setMessageList(Stream.of(upStreamTaskResult)
+                                .map(SystemMessage::new).collect(Collectors.toList()));
 
-                            //执行任务，得到本次任务的原始结果
-                            long tRun = System.currentTimeMillis();
-                            List<String> childResult = evelynManus.run(task.taskContent(), task.taskName(), emitter);
-                            log.info("[Phase] Subtask {} run() took {} ms", task.taskId(), System.currentTimeMillis() - tRun);
-                            //原始结果拼接
-                            String result = String.join("/n---/n", childResult);
-                            //蒸馏任务结果
-                            long tDistill = System.currentTimeMillis();
-                            DistilledResult distilledResult;
-                            if (result.length() < 2000) {
-                                distilledResult = new DistilledResult(task.taskId(), result, result, task);
-                                log.info("[Optimize] Skipped distill for task {} (already structured)", task.taskName());
-                            } else {
-                                distilledResult = distillSubTaskResult(task, result);
-                            }
-                            log.info("[Phase] Subtask {} distill took {} ms", task.taskId(), System.currentTimeMillis() - tDistill);
-
-                            resultMap.put(task.taskId(), distilledResult);
-                        } catch (Exception e) {
-                            log.error("[Optimize] Subtask {} failed: {}", task.taskId(), e.getMessage());
-                        }finally {
-                            //删除ThreadLocal防止内存泄露
-                            BaseContent.removeChatId();
-                            //释放ThreadLocal
-                            RequestContextHolder.resetRequestAttributes();
+                        //执行任务，得到本次任务的原始结果
+                        long tRun = System.currentTimeMillis();
+                        List<String> childResult = evelynManus.run(task.taskContent(), task.taskName(), emitter);
+                        log.info("[Phase] Subtask {} run() took {} ms", task.taskId(), System.currentTimeMillis() - tRun);
+                        //原始结果拼接
+                        String result = String.join("/n---/n", childResult);
+                        //蒸馏任务结果
+                        long tDistill = System.currentTimeMillis();
+                        DistilledResult distilledResult;
+                        if (result.length() < 2000) {
+                            distilledResult = new DistilledResult(task.taskId(), result, result, task);
+                            log.info("[Optimize] Skipped distill for task {} (already structured)", task.taskName());
+                        } else {
+                            distilledResult = distillSubTaskResult(task, result);
                         }
-                    }, executor));
-                }
-                //开启一个新异步任务ComletableFutrue,将之前的任务集合futrues传进来，在任务集合中的所有异步任务完成时，该任务才算完成，未完成时程序处于阻塞状态
-                //在这里的作用是阻塞等待全部异步任务完成
-                //todo 此处可以变更为倒计时锁后自动触发后续意图
-                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-            } finally {
-                //关闭线程池
-                executor.shutdown();
+                        log.info("[Phase] Subtask {} distill took {} ms", task.taskId(), System.currentTimeMillis() - tDistill);
+
+                        resultMap.put(task.taskId(), distilledResult);
+                    } catch (Exception e) {
+                        log.error("[Optimize] Subtask {} failed: {}", task.taskId(), e.getMessage());
+                    }finally {
+                        //删除ThreadLocal防止内存泄露
+                        BaseContent.removeChatId();
+                        //释放ThreadLocal
+                        RequestContextHolder.resetRequestAttributes();
+                    }
+                }, threadPool));
             }
+            //开启一个新异步任务ComletableFutrue,将之前的任务集合futrues传进来，在任务集合中的所有异步任务完成时，该任务才算完成，未完成时程序处于阻塞状态
+            //在这里的作用是阻塞等待全部异步任务完成
+            //todo 此处可以变更为倒计时锁后自动触发后续意图
+            //todo 未设置超时时间，可能会造成程序阻塞
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         }
 
         //整合结果集和意图，得到最终结果
