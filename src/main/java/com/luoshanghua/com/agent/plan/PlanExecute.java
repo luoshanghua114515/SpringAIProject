@@ -106,6 +106,7 @@ public class PlanExecute {
                 .collect(Collectors.toMap(SubTask::taskId, Function.identity()));
 
         for (Set<Integer> waveTaskIds : waves) {
+            //todo 后续可变更为多层级并行执行
             //创建一个装载异步任务类CompletableFuture集合
             List<CompletableFuture<Void>> futures = new ArrayList<>();
             for (int taskId : waveTaskIds) {
@@ -121,10 +122,10 @@ public class PlanExecute {
                     BaseContent.setChatId(chatId);
                     //设置当前异步线程的登录用户
                     BaseContent.setUser(userLoginDTO);
+                    //todo
                     long taskStart = System.currentTimeMillis();
                     log.info("[Phase] Starting subtask {}: {}", task.taskId(), task.taskName());
                     try {
-                        //todo 此处捕获异常后未通知外部阻塞线程，会导致主线程永远阻塞
                         ToolCallback[] tools = getTools(task.toolNames());
                         EvelynManus evelynManus = new EvelynManus(tools, openAiChatModel);
 //                            safeSendEventThink(emitter, "开始执行任务【" + task.taskName() + "】\n");
@@ -140,7 +141,7 @@ public class PlanExecute {
                         List<String> childResult = evelynManus.run(task.taskContent(), task.taskName(), emitter);
                         log.info("[Phase] Subtask {} run() took {} ms", task.taskId(), System.currentTimeMillis() - tRun);
                         //原始结果拼接
-                        String result = String.join("/n---/n", childResult);
+                        String result = String.join("\n---\n", childResult);
                         //蒸馏任务结果
                         long tDistill = System.currentTimeMillis();
                         DistilledResult distilledResult;
@@ -150,12 +151,17 @@ public class PlanExecute {
                         } else {
                             distilledResult = distillSubTaskResult(task, result);
                         }
+                        //记录蒸馏任务时间
                         log.info("[Phase] Subtask {} distill took {} ms", task.taskId(), System.currentTimeMillis() - tDistill);
 
                         resultMap.put(task.taskId(), distilledResult);
                     } catch (Exception e) {
                         log.error("[Optimize] Subtask {} failed: {}", task.taskId(), e.getMessage());
+                        //todo 此处应该重新将异常抛出，避免外层线程将失败任务记录为成功任务
                     }finally {
+                        //记录本次任务执行时间
+                        log.info("[Phase] Subtask {} total took {} ms",
+                                taskId, System.currentTimeMillis() - taskStart);
                         //删除ThreadLocal防止内存泄露
                         BaseContent.removeChatId();
                         //释放ThreadLocal
@@ -164,10 +170,21 @@ public class PlanExecute {
                 }, threadPool));
             }
             //开启一个新异步任务ComletableFutrue,将之前的任务集合futrues传进来，在任务集合中的所有异步任务完成时，该任务才算完成，未完成时程序处于阻塞状态
-            //在这里的作用是阻塞等待全部异步任务完成
-            //todo 此处可以变更为倒计时锁后自动触发后续意图
-            //todo 未设置超时时间，可能会造成程序阻塞
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            try {
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .orTimeout(5,TimeUnit.MINUTES)
+                        .join();
+
+            }catch (CompletionException e){
+                if (e.getCause() instanceof TimeoutException) {
+                    log.error("[Error] Wave execution timed out after 5 minutes");
+                    throw new RuntimeException("任务执行超时", e);
+                } else {
+                    log.error("[Error] Wave execution failed: {}", e.getMessage());
+                    throw new RuntimeException("任务执行失败", e);
+                }
+            }
+
         }
 
         //整合结果集和意图，得到最终结果
@@ -229,6 +246,8 @@ public class PlanExecute {
      * @return
      */
     private List<Set<Integer>> buildExecutionWaves(List<SubTask> subTasks) {
+        //todo 此处构建分层还是只执行最内层任务并行，未实现同层级并行执行的逻辑
+
         // dependsOn: for each task, which upstream taskIds it depends on
         Map<Integer, Set<Integer>> dependsOn = new HashMap<>();
         Map<Integer, SubTask> taskMap = new HashMap<>();
