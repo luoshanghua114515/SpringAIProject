@@ -77,9 +77,18 @@ public class PlanExecute {
                 new MyLoggerAdvisor()
         ).build();
     }
-    //计划执行，整个智能体执行的入口
-    public String planExecute(String originalTask, String conversationId, SseEmitter emitter) throws IOException {
-        long overallStart = System.currentTimeMillis();//获取系统时间
+
+    /**
+     * 计划执行，智能体执行的入口
+     *
+     * @param originalTask      任务内容
+     * @param conversationId    会话id
+     * @param emitter           流式响应对象
+     * @return                  任务执行结果
+     */
+    public String planExecute(String originalTask, String conversationId, SseEmitter emitter) {
+        //todo 会话内历史记录处理逻辑缺失
+        long overallStart = System.currentTimeMillis();
         //由于任务并行执行时会额外开启一次异步线程，所以需要传递一下线程上下文（本质将Web线程上下文传递到任务执行线程）
         //获取当前线程的上下文
         RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
@@ -94,9 +103,7 @@ public class PlanExecute {
         DecomposedTasks decomposedTasks = decomposeTaskWithContract(originalTask);
         log.info("[Phase] decomposeTask took {} ms", System.currentTimeMillis() - t0);
         List<SubTask> subTasks = decomposedTasks.subTaskList();
-        String taskMessage = subTasks.stream().map(s -> {
-            return "任务" + s.taskId() + "：" + s.taskName();
-        }).collect(Collectors.joining("\n---\n"));
+        String taskMessage = subTasks.stream().map(s -> "任务" + s.taskId() + "：" + s.taskName()).collect(Collectors.joining("\n---\n"));
         if(!SSESend.sendEventThink(emitter,"任务拆分完成：\n"+taskMessage)) return null;
         //对每个子任务执行，得到结果集（并行wave执行）
         ConcurrentHashMap<Integer, DistilledResult> resultMap = new ConcurrentHashMap<>();
