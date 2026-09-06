@@ -27,38 +27,13 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 
-/**
- * 3. 任务分解结果：带全局约束的子任务列表
- */
-record DecomposedTasks(
-        // 带契约的子任务列表
-        List<SubTask> subTaskList
-) {}
-
-/**
- * 4. 蒸馏结果双副本：解决上下文膨胀+兜底召回
- */
-record DistilledResult(
-        // 所属子任务ID
-        int taskId,
-        // 【进上下文】结构化蒸馏后的核心结果（token压缩90%+）
-        String structuredCoreResult,
-        // 【归档不进上下文】子任务原始完整结果（兜底召回用）
-        String rawResult,
-        // 子任务契约（用于下游校验）
-        SubTask subTask
-) {}
-
-
-
-
 @Component
 @Slf4j
 public class PlanExecute {
 
-    private ChatClient chatClient;
+    private final ChatClient chatClient;
 
-    private OpenAiChatModel openAiChatModel;
+    private final OpenAiChatModel openAiChatModel;
 
     public static final  ThreadPoolExecutor threadPool = new ThreadPoolExecutor(
             10,
@@ -129,7 +104,6 @@ public class PlanExecute {
                     BaseContent.setChatId(chatId);
                     //设置当前异步线程的登录用户
                     BaseContent.setUser(userLoginDTO);
-                    //todo
                     long taskStart = System.currentTimeMillis();
                     log.info("[Phase] Starting subtask {}: {}", task.taskId(), task.taskName());
                     try {
